@@ -11,11 +11,11 @@
  *  2 - muc02sensor
  *  3 - muc03sensor
  */
-#define SENSOR_ID 2
+#define SENSOR_ID 3
 
 // enable features
-#define OLED_DISPLAY
-#define SHT30
+ #define OLED_DISPLAY
+ #define SHT30
 // #define DHT22
 
 /*
@@ -54,17 +54,19 @@
 // Depends on SENSOR_ID
 #if SENSOR_ID == 1                  // outside sht30 sensor
   #define DEVICE_FQN "muc01sensor"
+  #define DEVICE_FQN_SHORT "muc01sens."
   #define SENSOR_TYPE "outdoor"
   // MQTT: topic
   const char* MQTT_SENSOR_TOPIC = "home/sensor/outside_1";
 #elif SENSOR_ID == 2                // network cabinet sht30 sensor
   #define DEVICE_FQN "muc02sensor"
-    #define DEVICE_FQN_SHORT "muc02sens."
+  #define DEVICE_FQN_SHORT "muc02sens."
   #define SENSOR_TYPE "indoor"
   // MQTT: topic
   const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_1";
-#elif SENSOR_ID == 3                // network cabinet dht22 sensor
+#elif SENSOR_ID == 3                // network cabinet sht30 sensor
   #define DEVICE_FQN "muc03sensor"
+  #define DEVICE_FQN_SHORT "muc03sens."
   #define SENSOR_TYPE "indoor"
   // MQTT: topic
   const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_2";

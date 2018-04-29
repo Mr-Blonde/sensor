@@ -17,6 +17,7 @@
  #define OLED_DISPLAY
  #define SHT30
 // #define DHT22
+// #define SERIAL_DEBUG
 
 /*
  * END CHANGE
@@ -92,7 +93,7 @@ long lastMsg = 0;
 
 // MQTT: ID, server IP, port, username and password
 const char* MQTT_CLIENT_ID = DEVICE_FQN;
-const char* MQTT_SERVER_IP = "10.0.1.200";
+const char* MQTT_SERVER_IP = MQTT_SERVER_IP_ADDR;
 const uint16_t MQTT_SERVER_PORT = 1883;
 
 WiFiClient wifiClient;
@@ -101,8 +102,6 @@ ESP8266WebServer server(80);
  
 float humidity, temp;  // Values read from sensor
 char str_humidity[10], str_temperature[10];  // Rounded sensor values and as strings
-String webString="";     // String to display
-// Generally, you should use "unsigned long" for variables that hold time
 unsigned long previousMillis = 0;        // will store last temp was read
 const long interval = 2000;              // interval at which to read sensor
 
@@ -133,7 +132,7 @@ void readSensors() {
     
     // Check if any reads failed and exit early (to try again).
     if (isnan(humidity) || isnan(temp)) {
-      Serial.println("Failed to read from SHT sensor!");
+      Serial.println(F("Failed to read from SHT sensor!"));
       return;
     } else {
       dtostrf(humidity, 1, 2, str_humidity);
@@ -170,7 +169,6 @@ void publishData() {
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = str_temperature;
   root["humidity"] = str_humidity;
-//  root["waterlevel"] = str_distance;
   root.prettyPrintTo(Serial);
   Serial.println("");
   /*
@@ -191,14 +189,20 @@ void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
-    Serial.print("INFO: Attempting MQTT connection...");
+    #ifdef SERIAL_DEBUG
+      Serial.print(F("INFO: Attempting MQTT connection..."));
+    #endif
     // Attempt to connect
     if (client.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
-      Serial.println("INFO: connected");
+      #ifdef SERIAL_DEBUG
+        Serial.println(F("INFO: connected"));
+      #endif
     } else {
-      Serial.print("ERROR: failed, rc=");
-      Serial.print(client.state());
-      Serial.println("DEBUG: try again in 5 seconds");
+      #ifdef SERIAL_DEBUG
+        Serial.print(F("ERROR: failed, rc="));
+        Serial.print(client.state());
+        Serial.println(F("DEBUG: try again in 5 seconds"));
+      #endif
       // Wait 5 seconds before retrying
       delay(5000);
     }
@@ -302,13 +306,18 @@ void setup(void)
   
   // Connect to WiFi network
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.println(DEVICE_FQN);
-  Serial.print("\n\rWorking to connect");
+  
+  #ifdef SERIAL_DEBUG
+    Serial.println(DEVICE_FQN);
+    Serial.print(F("\n\rWorking to connect"));
+  #endif
  
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    #ifdef SERIAL_DEBUG
+      Serial.print(".");
+    #endif
   }
 
   /*
@@ -317,22 +326,30 @@ void setup(void)
   ArduinoOTA.setPassword(OTA_PASS);
   //Send OTA events to the browser
   ArduinoOTA.onStart([]() {
-    Serial.println("Update Start");
+    #ifdef SERIAL_DEBUG
+      Serial.println(F("Update Start"));
+    #endif
   });
   ArduinoOTA.onEnd([]() {
-    Serial.println("Update End");
+    #ifdef SERIAL_DEBUG
+      Serial.println(F("Update End"));
+    #endif
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    char p[32];
-    sprintf(p, "Progress: %u%%\n", (progress / (total / 100)));
-    Serial.println(p);
+    #ifdef SERIAL_DEBUG
+      char p[32];
+      sprintf(p, "Progress: %u%%\n", (progress / (total / 100)));
+      Serial.println(p);
+    #endif
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Recieve Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    #ifdef SERIAL_DEBUG
+      if (error == OTA_AUTH_ERROR) Serial.println(F("Auth Failed"));
+      else if (error == OTA_BEGIN_ERROR) Serial.println(F("Begin Failed"));
+      else if (error == OTA_CONNECT_ERROR) Serial.println(F("Connect Failed"));
+      else if (error == OTA_RECEIVE_ERROR) Serial.println(F("Recieve Failed"));
+      else if (error == OTA_END_ERROR) Serial.println(F("End Failed"));
+    #endif
   });
   ArduinoOTA.setHostname(DEVICE_FQN);
   ArduinoOTA.begin();
@@ -340,12 +357,14 @@ void setup(void)
   /* END OTA Update */
 
   SPIFFS.begin();
-  
-  Serial.println("");
-  Serial.printf("Hello, this is %s\n",DEVICE_FQN);
-  Serial.printf("Connected to: %s\n", WIFI_SSID);
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+
+  #ifdef SERIAL_DEBUG
+    Serial.println("");
+    Serial.printf("Hello, this is %s\n",DEVICE_FQN);
+    Serial.printf("Connected to: %s\n", WIFI_SSID);
+    Serial.print(F("IP address: "));
+    Serial.println(WiFi.localIP());
+  #endif
    
   server.on("/", handle_root);
   server.on("/index.html", handle_root);
@@ -355,7 +374,9 @@ void setup(void)
   server.onNotFound(handleUnknown);
   
   server.begin();
-  Serial.println("HTTP server started");
+  #ifdef SERIAL_DEBUG
+    Serial.println(F("HTTP server started"));
+  #endif
   
   // init the MQTT connection
   client.setServer(MQTT_SERVER_IP, MQTT_SERVER_PORT);
@@ -379,7 +400,6 @@ void loop(void)
   long now = millis();
   if (now - lastMsg > SENSOR_READ_INTERVAL) {
     lastMsg = now;
-    
     readSensors();
     publishData();
   }

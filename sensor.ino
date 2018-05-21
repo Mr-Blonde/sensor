@@ -11,13 +11,14 @@
  *  2 - muc02sensor
  *  3 - muc03sensor
  */
-#define SENSOR_ID 3
+#define SENSOR_ID 1
 
 // enable features
- #define OLED_DISPLAY
- #define SHT30
+// #define OLED_DISPLAY
+// #define SHT30
+ #define BMP280
 // #define DHT22
-// #define SERIAL_DEBUG
+ #define SERIAL_DEBUG
 
 /*
  * END CHANGE
@@ -45,8 +46,14 @@
 
 #ifdef SHT30
   #include <WEMOS_SHT3X.h>
-#elif defined(DHT22)
-  #include <DHT.h>
+#endif
+
+#ifdef BMP280
+  #include <Adafruit_Sensor.h>
+  #include <Adafruit_BMP280.h>
+//  #define BMP_SDA 2
+//  #define BMP_SCL 14
+  Adafruit_BMP280 bme;
 #endif
 
 #define DEVICE_VER "0.9.9"
@@ -100,8 +107,8 @@ WiFiClient wifiClient;
 PubSubClient client(wifiClient); 
 ESP8266WebServer server(80);
  
-float humidity, temp;  // Values read from sensor
-char str_humidity[10], str_temperature[10];  // Rounded sensor values and as strings
+float humidity, temp, pressure;           // Values read from sensor
+char str_humidity[10], str_temperature[10], str_pressure[10];  // Rounded sensor values and as strings
 unsigned long previousMillis = 0;        // will store last temp was read
 const long interval = 2000;              // interval at which to read sensor
 
@@ -125,19 +132,36 @@ void readSensors() {
       sht30.get();
       humidity = sht30.humidity;            // SHT30 - Read humidity (percent)
       temp = sht30.cTemp;                   // SHT30 - Read temperature as Celcius
+      pressure = 0;                         // SHT30 has no pressure reading
+    #elif defined(BMP280)
+      temp = bme.readTemperature();         // BMP280 - Read temperature as Celcius
+      humidity = 0;                         // BMP280 has no humidity reading
+      pressure = bme.readPressure() / 100;        // BMP280 - Read pressure in Pascal (Pa) and convert it to hPa
     #elif defined(DHT20)
       humidity = dht.readHumidity();        // DHT22 - Read humidity (percent)
       temp = dht.readTemperature();         // DHT22 - Read temperature as Celcius
+      pressure = 0;                         // DHT22 has no pressure reading
     #endif
     
     // Check if any reads failed and exit early (to try again).
-    if (isnan(humidity) || isnan(temp)) {
-      Serial.println(F("Failed to read from SHT sensor!"));
+    if (isnan(humidity) || isnan(temp) || isnan(pressure)) {
+      Serial.println(F("Failed to read from sensor!"));
       return;
     } else {
       dtostrf(humidity, 1, 2, str_humidity);
       dtostrf(temp, 1, 2, str_temperature);
+      dtostrf(pressure, 3, 2, str_pressure);
     }
+
+    #ifdef SERIAL_DEBUG
+      Serial.print("Sensor reading: T=");
+      Serial.print(temp);
+      Serial.print("C H=");
+      Serial.print(humidity);
+      Serial.print("% P=");
+      Serial.print(pressure);
+      Serial.println("hPa");   
+    #endif 
   }
 
   #ifdef OLED_DISPLAY
@@ -150,10 +174,25 @@ void readSensors() {
     display.print("\nT ");
     display.print(temp);
     display.println(" C");
- 
-    display.print("H ");
-    display.print(humidity);
-    display.println(" %");
+
+    #ifdef SHT30
+      display.print("H ");
+      display.print(humidity);
+      display.println(" %");
+    #endif
+
+    #ifdef DHT22
+      display.print("H ");
+      display.print(humidity);
+      display.println(" %");
+    #endif
+
+    #ifdef BMP280
+      display.print("P ");
+      display.print(pressure);
+      display.println(" Pa");
+    #endif
+    
     display.display();
   #endif
   
@@ -169,12 +208,14 @@ void publishData() {
   // INFO: the data must be converted into a string; a problem occurs when using floats...
   root["temperature"] = str_temperature;
   root["humidity"] = str_humidity;
+  root["pressure"] = str_pressure;
   root.prettyPrintTo(Serial);
   Serial.println("");
   /*
      {
         "temperature": "23.20" ,
         "humidity": "43.70"
+        "pressure": "900"
      }
   */
   char data[200];
@@ -245,13 +286,32 @@ void handle_root() {
   response += "&deg;C</p></div>\n";
   response += "</div></div>\n";
 
+#ifdef SHT30
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
   response += "%</p></div>\n";
   response += "</div></div>\n";
+#endif
 
+#ifdef DHT22
+  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
+  response += str_humidity;
+  response += "%</p></div>\n";
+  response += "</div></div>\n";
+#endif
+
+#ifdef BMP280
+  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"presure.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Pressure<br/><p class=\"lead\">";
+  response += str_pressure;
+  response += " Pa</p></div>\n";
+  response += "</div></div>\n";
+#endif
   response += "</div>\n";
   response += "<div class=\"page-footer\">\n";
   response += "<hr>\n";
@@ -281,6 +341,9 @@ void handleGetReadings() {
   response += "<humidity>";
   response += str_humidity;
   response += "</humidity>";
+  response += "<pressure>";
+  response += str_pressure;
+  response += "</pressure>";  
   response += "</readings>";
 
   server.send(200, "text/xml",response);
@@ -302,6 +365,11 @@ void setup(void)
 
   #ifdef DHT22
     dht.begin();
+  #endif
+
+  #ifdef BMP280
+//    Wire.begin(BMP_SDA,BMP_SCL);
+    if (!bme.begin()) Serial.println("Could not find a valid BMP280 sensor, check wiring!");
   #endif
   
   // Connect to WiFi network

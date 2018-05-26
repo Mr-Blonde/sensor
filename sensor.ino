@@ -16,7 +16,7 @@
 // enable features
 // #define OLED_DISPLAY
 // #define SHT30
- #define BMP280
+ #define BME280
 // #define DHT22
  #define SERIAL_DEBUG
 
@@ -48,12 +48,12 @@
   #include <WEMOS_SHT3X.h>
 #endif
 
-#ifdef BMP280
+#ifdef BME280
   #include <Adafruit_Sensor.h>
-  #include <Adafruit_BMP280.h>
-//  #define BMP_SDA 2
-//  #define BMP_SCL 14
-  Adafruit_BMP280 bme;
+  #include <Adafruit_BME280.h>
+//  #define BME_SDA 5
+//  #define BME_SCL 4
+  Adafruit_BME280 bme;
 #endif
 
 #define DEVICE_VER "0.9.9"
@@ -133,10 +133,10 @@ void readSensors() {
       humidity = sht30.humidity;            // SHT30 - Read humidity (percent)
       temp = sht30.cTemp;                   // SHT30 - Read temperature as Celcius
       pressure = 0;                         // SHT30 has no pressure reading
-    #elif defined(BMP280)
-      temp = bme.readTemperature();         // BMP280 - Read temperature as Celcius
-      humidity = 0;                         // BMP280 has no humidity reading
-      pressure = bme.readPressure() / 100;        // BMP280 - Read pressure in Pascal (Pa) and convert it to hPa
+    #elif defined(BME280)
+      temp = bme.readTemperature();         // BME280 - Read temperature as Celcius
+      humidity = bme.readHumidity();        // BME280 - Read temperature as Celcius
+      pressure = bme.readPressure() / 100;  // BME280 - Read pressure in Pascal (Pa) and convert it to hPa
     #elif defined(DHT20)
       humidity = dht.readHumidity();        // DHT22 - Read humidity (percent)
       temp = dht.readTemperature();         // DHT22 - Read temperature as Celcius
@@ -187,7 +187,7 @@ void readSensors() {
       display.println(" %");
     #endif
 
-    #ifdef BMP280
+    #ifdef BME280
       display.print("P ");
       display.print(pressure);
       display.println(" Pa");
@@ -279,6 +279,7 @@ void handle_root() {
   response += "</div>\n";
   response += "<div class=\"row\">\n";
 
+#ifdef SHT30
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
@@ -286,7 +287,6 @@ void handle_root() {
   response += "&deg;C</p></div>\n";
   response += "</div></div>\n";
 
-#ifdef SHT30
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
@@ -297,6 +297,13 @@ void handle_root() {
 
 #ifdef DHT22
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
+  response += str_temperature;
+  response += "&deg;C</p></div>\n";
+  response += "</div></div>\n";
+
+  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
@@ -304,14 +311,29 @@ void handle_root() {
   response += "</div></div>\n";
 #endif
 
-#ifdef BMP280
-  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
+#ifdef BME280
+  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
+  response += str_temperature;
+  response += "&deg;C</p></div>\n";
+  response += "</div></div>\n";
+
+  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
+  response += str_humidity;
+  response += "%</p></div>\n";
+  response += "</div></div>\n";
+
+  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"presure.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Pressure<br/><p class=\"lead\">";
   response += str_pressure;
   response += " Pa</p></div>\n";
-  response += "</div></div>\n";
+  response += "</div></div>\n";  
 #endif
+
   response += "</div>\n";
   response += "<div class=\"page-footer\">\n";
   response += "<hr>\n";
@@ -367,9 +389,9 @@ void setup(void)
     dht.begin();
   #endif
 
-  #ifdef BMP280
-//    Wire.begin(BMP_SDA,BMP_SCL);
-    if (!bme.begin()) Serial.println("Could not find a valid BMP280 sensor, check wiring!");
+  #ifdef BME280
+//    Wire.begin(BME_SDA,BME_SCL);
+    if (!bme.begin()) Serial.println("Could not find a valid BME280 sensor, check wiring!");
   #endif
   
   // Connect to WiFi network

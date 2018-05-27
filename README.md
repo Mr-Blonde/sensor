@@ -1,6 +1,16 @@
 # sensor
 ESP8266 based sensor
 
+Temperature/Humidity/Pressure sensor node for indoor and outdoor use. 
+
+## Features
+- SHT30 supported
+- BME280 supported
+- OLED display supported
+- Battery monitoring supported (for wemos battery shield)
+- sensor reading response via HTML (port 80 - /index.html)
+- sensor reading response via XML (port 80 - /readings.xml)
+- periodically publishing sensor readings via MQTT
 
 ## Requires config.h
 

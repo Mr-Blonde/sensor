@@ -314,14 +314,14 @@ void handle_root() {
   response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
   response += str_temperature;
-  response += "&deg;C</p></div>\n";
+  response += " &deg;C</p></div>\n";
   response += "</div></div>\n";
 
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
-  response += "%</p></div>\n";
+  response += " %</p></div>\n";
   response += "</div></div>\n";
 #endif
 
@@ -330,14 +330,14 @@ void handle_root() {
   response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
   response += str_temperature;
-  response += "&deg;C</p></div>\n";
+  response += " &deg;C</p></div>\n";
   response += "</div></div>\n";
 
   response += "<div class=\"col-md-6\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
-  response += "%</p></div>\n";
+  response += " %</p></div>\n";
   response += "</div></div>\n";
 #endif
 
@@ -346,21 +346,21 @@ void handle_root() {
   response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
   response += str_temperature;
-  response += "&deg;C</p></div>\n";
+  response += " &deg;C</p></div>\n";
   response += "</div></div>\n";
 
   response += "<div class=\"col-md-3\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
-  response += "%</p></div>\n";
+  response += " %</p></div>\n";
   response += "</div></div>\n";
 
   response += "<div class=\"col-md-3\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"pressure.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Pressure<br/><p class=\"lead\">";
   response += str_pressure;
-  response += " Pa</p></div>\n";
+  response += " hPa</p></div>\n";
   response += "</div></div>\n";  
 
   response += "<div class=\"col-md-3\"><div class=\"row\">\n";

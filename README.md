@@ -6,16 +6,16 @@ ESP8266 based sensor
 
 Config.h must contain the following #defines
 
-'#define WIFI_SSID'
+#define WIFI_SSID
 
-'#define WIFI_PASS'
+#define WIFI_PASS
 
-'#define OTA_PASS'
+#define OTA_PASS
 
-'#define MQTT_USER'
+#define MQTT_USER
 
-'#define MQTT_PASSWORD'
+#define MQTT_PASSWORD
 
-'#define SENSOR_DOMAIN'
+#define SENSOR_DOMAIN
 
-'#define MQTT_SERVER_IP_ADDR'
+#define MQTT_SERVER_IP_ADDR

@@ -1,6 +1,6 @@
 /*
  * sensor
- * version 0.9.9 (03/29/2018)
+ * version 1.0.0 (05/26/2018)
  * 
  */
 
@@ -16,9 +16,10 @@
 // enable features
 // #define OLED_DISPLAY
 // #define SHT30
- #define BME280
+  #define BME280
 // #define DHT22
- #define SERIAL_DEBUG
+  #define BATTERY_MONITOR
+//  #define SERIAL_DEBUG
 
 /*
  * END CHANGE
@@ -51,16 +52,20 @@
 #ifdef BME280
   #include <Adafruit_Sensor.h>
   #include <Adafruit_BME280.h>
-//  #define BME_SDA 5
-//  #define BME_SCL 4
+  #define BME_SENSOR_ADDR 0x76      // I2C address of the sensor
   Adafruit_BME280 bme;
 #endif
 
-#define DEVICE_VER "0.9.9"
+#ifdef BATTERY_MONITOR
+  unsigned int raw_adc_value = 0;
+  float volt = 0.0;
+#endif
+
+#define DEVICE_VER "1.0.0"
 #define MQTT_VERSION MQTT_VERSION_3_1_1
 
 // Depends on SENSOR_ID
-#if SENSOR_ID == 1                  // outside sht30 sensor
+#if SENSOR_ID == 1                  // outside bme280 sensor
   #define DEVICE_FQN "muc01sensor"
   #define DEVICE_FQN_SHORT "muc01sens."
   #define SENSOR_TYPE "outdoor"
@@ -108,7 +113,7 @@ PubSubClient client(wifiClient);
 ESP8266WebServer server(80);
  
 float humidity, temp, pressure;           // Values read from sensor
-char str_humidity[10], str_temperature[10], str_pressure[10];  // Rounded sensor values and as strings
+char str_humidity[10], str_temperature[10], str_pressure[10], str_volt[10];  // Rounded sensor values and as strings
 unsigned long previousMillis = 0;        // will store last temp was read
 const long interval = 2000;              // interval at which to read sensor
 
@@ -135,22 +140,29 @@ void readSensors() {
       pressure = 0;                         // SHT30 has no pressure reading
     #elif defined(BME280)
       temp = bme.readTemperature();         // BME280 - Read temperature as Celcius
-      humidity = bme.readHumidity();        // BME280 - Read temperature as Celcius
+      humidity = bme.readHumidity();        // BME280 - Read humidity (percent)
       pressure = bme.readPressure() / 100;  // BME280 - Read pressure in Pascal (Pa) and convert it to hPa
     #elif defined(DHT20)
       humidity = dht.readHumidity();        // DHT22 - Read humidity (percent)
       temp = dht.readTemperature();         // DHT22 - Read temperature as Celcius
       pressure = 0;                         // DHT22 has no pressure reading
     #endif
+
+    #ifdef BATTERY_MONITOR
+      raw_adc_value = analogRead(A0);       // Get ADC value (connected via 100k with vbat+)
+      volt=raw_adc_value/1023.0;            // Max reading equals 1V ADC meassurement
+      volt=volt*4.2;                        // Normalize to 4.2V (max. battery voltage - li-ion single cell)
+    #endif
     
     // Check if any reads failed and exit early (to try again).
     if (isnan(humidity) || isnan(temp) || isnan(pressure)) {
       Serial.println(F("Failed to read from sensor!"));
       return;
-    } else {
+    } else {                                // Convert int/long/float to string
       dtostrf(humidity, 1, 2, str_humidity);
       dtostrf(temp, 1, 2, str_temperature);
       dtostrf(pressure, 3, 2, str_pressure);
+      dtostrf(volt, 1, 3, str_volt);
     }
 
     #ifdef SERIAL_DEBUG
@@ -160,11 +172,13 @@ void readSensors() {
       Serial.print(humidity);
       Serial.print("% P=");
       Serial.print(pressure);
-      Serial.println("hPa");   
+      Serial.print("hPa V=");   
+      Serial.print(volt);
+      Serial.println("V");
     #endif 
   }
 
-  #ifdef OLED_DISPLAY
+  #ifdef OLED_DISPLAY                       // Show values on OLED display
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
@@ -199,7 +213,9 @@ void readSensors() {
 } // End readSensors
 
 
-// function called to publish the temperature and the humidity
+/*
+ * Publish sensor readings via MQTT
+ */
 void publishData() {
   // create a JSON object
   // doc : https://github.com/bblanchon/ArduinoJson/wiki/API%20Reference
@@ -209,15 +225,21 @@ void publishData() {
   root["temperature"] = str_temperature;
   root["humidity"] = str_humidity;
   root["pressure"] = str_pressure;
-  root.prettyPrintTo(Serial);
-  Serial.println("");
-  /*
-     {
-        "temperature": "23.20" ,
-        "humidity": "43.70"
-        "pressure": "900"
-     }
-  */
+  root["volt"] = str_volt;
+  
+  #ifdef SERIAL_DEBUG  
+    root.prettyPrintTo(Serial);
+    Serial.println("");
+    /* sample output:
+       {
+          "temperature": "23.20" ,
+          "humidity": "43.70"
+          "pressure": "956.32"
+          "volt": "4.2"
+       }
+    */
+  #endif
+  
   char data[200];
   root.printTo(data, root.measureLength() + 1);
   client.publish(MQTT_SENSOR_TOPIC, data, true);
@@ -225,8 +247,13 @@ void publishData() {
 
 // function called when a MQTT message arrived
 void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
+  // nothing to do here
+  // we are not expecting any messages...
 }
 
+/*
+ * MQTT reconnect
+ */
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
@@ -250,12 +277,15 @@ void reconnect() {
   }
 }
 
+/*
+ * Serve main HTML page
+ */
 void handle_root() {
 
-  readSensors();
+  readSensors();              // get sensor readings
 
   String response;
-  response += "<html>\n";
+  response += "<html>\n";     // construct HTML page/response
   response += "<head>\n";
   response += "<meta charset=\"utf-8\">\n";
   response += "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\n";
@@ -312,25 +342,32 @@ void handle_root() {
 #endif
 
 #ifdef BME280
-  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
   response += str_temperature;
   response += "&deg;C</p></div>\n";
   response += "</div></div>\n";
 
-  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
   response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
   response += str_humidity;
   response += "%</p></div>\n";
   response += "</div></div>\n";
 
-  response += "<div class=\"col-md-4\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"presure.png\" /> </div>\n";
+  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"pressure.png\" /> </div>\n";
   response += "<div class=\"col-md-9\"> Pressure<br/><p class=\"lead\">";
   response += str_pressure;
   response += " Pa</p></div>\n";
+  response += "</div></div>\n";  
+
+  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
+  response += "<div class=\"col-md-3\"> <img src=\"battery.png\" /> </div>\n";
+  response += "<div class=\"col-md-9\"> Battery<br/><p class=\"lead\">";
+  response += str_volt;
+  response += " V</p></div>\n";
   response += "</div></div>\n";  
 #endif
 
@@ -347,13 +384,16 @@ void handle_root() {
   response += "</body>\n";
   response += "</html>\n";
   
-  server.send(200, "text/html", response);
+  server.send(200, "text/html", response);    // send page to client
 }
 
+/*
+ * Return sensor readings in XML format
+ */
 void handleGetReadings() {
-  readSensors();
+  readSensors();          // read sensor values
 
-  String response;
+  String response;        // Construct XML response
 
   response += "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>";
   response += "<readings>";
@@ -368,7 +408,7 @@ void handleGetReadings() {
   response += "</pressure>";  
   response += "</readings>";
 
-  server.send(200, "text/xml",response);
+  server.send(200, "text/xml",response);    // send to client
 }
 
 
@@ -390,8 +430,11 @@ void setup(void)
   #endif
 
   #ifdef BME280
-//    Wire.begin(BME_SDA,BME_SCL);
-    if (!bme.begin()) Serial.println("Could not find a valid BME280 sensor, check wiring!");
+    if (!bme.begin(BME_SENSOR_ADDR)) Serial.println("Could not find a valid BME280 sensor, check wiring!");
+  #endif
+
+  #ifdef BATTERY_MONITOR
+    pinMode(A0, INPUT);
   #endif
   
   // Connect to WiFi network
@@ -455,7 +498,8 @@ void setup(void)
     Serial.print(F("IP address: "));
     Serial.println(WiFi.localIP());
   #endif
-   
+
+  // register HTTP server callbacks
   server.on("/", handle_root);
   server.on("/index.html", handle_root);
   server.on("/readings.xml",handleGetReadings);
@@ -477,18 +521,17 @@ void setup(void)
  * MAIN LOOP
  */
  
-void loop(void)
-{
-  server.handleClient();
-  ArduinoOTA.handle();
+void loop(void) {
+  server.handleClient();      // handle HTTP clients
+  ArduinoOTA.handle();        // handle OTA clients
 
-  if (!client.connected()) {
+  if (!client.connected()) {  // keep MQTT connection alive
     reconnect();
   }
   client.loop();  
 
   long now = millis();
-  if (now - lastMsg > SENSOR_READ_INTERVAL) {
+  if (now - lastMsg > SENSOR_READ_INTERVAL) {   // periodically send measurements via MQTT
     lastMsg = now;
     readSensors();
     publishData();
@@ -512,6 +555,7 @@ void handleUnknown()
   File pageFile = SPIFFS.open(filename, "r");
   if (pageFile) {
     String contentTyp = StaticRequestHandler::getContentType(filename);
+    server.sendHeader("Cache-Control","public, max-age=31536000");
     size_t sent = server.streamFile(pageFile, contentTyp);
     pageFile.close();
   }

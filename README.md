@@ -49,4 +49,9 @@ Config.h must contain the following #defines
   - [Adafruit_Sensor](https://github.com/adafruit/Adafruit_Sensor)
   - [Adafruit_BME280](https://github.com/adafruit/Adafruit_BME280_Library)
 
+## Upload support files to flash
+All files located within the `data/` subfolder need to be copied into the ESP's flash memory. The firmware contains an upload function through HTTP. Use the 'uploadDataToSpiffs' script to automate the curl uploads.
 
+Usage:
+
+`./uploadDataToSpiffs DEVICE.IP.ADDR.HERE`

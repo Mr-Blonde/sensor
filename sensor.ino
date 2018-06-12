@@ -1,7 +1,11 @@
 /*
  * sensor
- * version 1.0.0 (05/26/2018)
+ * version 1.1.0 (06/02/2018)
+ *
  * 
+ * Please note: If you use a brand new device or have previously erased the flash, uncomment the SPIFFS.format() line withing void setup() below.
+ *              The first boot/startup of the device will take quite a wile (depending on the devices flash size - 16MByte will take a couple of minutes for example)!
+ *              Make sure to comment the line out, once SPIFFS has been formated and reflash the device. Otherwise you will losse your flash content every time it boots.
  */
 
 
@@ -10,43 +14,85 @@
  *  1 - muc01sensor
  *  2 - muc02sensor
  *  3 - muc03sensor
+ *  
+ *  99 - mucXXsensor / Development sensor
  */
-#define SENSOR_ID 1
-
-// enable features
-// #define OLED_DISPLAY
-// #define SHT30
-  #define BME280
-// #define DHT22
-  #define BATTERY_MONITOR
-//  #define SERIAL_DEBUG
+ 
+#define SENSOR_ID 3
+#define DEVICE_VER "1.2.0"
 
 /*
  * END CHANGE
  */
 
+#ifdef ESP32
+  #include <WiFi.h>
+  #include <AsyncTCP.h>
+#elif ESP8266
+  #include <ESP8266WiFi.h>
+  #include <ESPAsyncTCP.h>
+#endif
 
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
+#include <ESPAsyncWebServer.h>
 #include <PubSubClient.h>
 #include <ArduinoOTA.h>
 #include <FS.h>
 #include <ArduinoJson.h>
-#include <detail/RequestHandlersImpl.h>
 #include "credentials.h"
 
-#ifdef OLED_DISPLAY
-  #include <SPI.h>
-  #include <Wire.h>
-  #include <Adafruit_GFX.h>
-  #include <Adafruit_SSD1306.h>
-  #if (SSD1306_LCDHEIGHT != 48)
-    #error("Height incorrect, please fix Adafruit_SSD1306.h!");
-  #endif
+// Depends on SENSOR_ID
+#if SENSOR_ID == 1                  // outside bme280 sensor
+  #define DEVICE_FQN "muc01sensor"
+  #define DEVICE_FQN_SHORT "muc01sens."
+  #define SENSOR_TYPE "outdoor"
+  // feature
+  #define BME280
+  #define BATTERY_MONITOR
+  // MQTT: topic
+  const char* MQTT_SENSOR_TOPIC = "home/sensor/outside_1";
+  
+#elif SENSOR_ID == 2                // network cabinet sht30 sensor
+  #define DEVICE_FQN "muc02sensor"
+  #define DEVICE_FQN_SHORT "muc02sens."
+  #define SENSOR_TYPE "indoor"
+  // feature
+  #define OLED_DISPLAY
+  #define SHT30
+  // MQTT: topic
+  const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_1";
+  
+#elif SENSOR_ID == 3                // network cabinet sht30 sensor
+  #define DEVICE_FQN "muc03sensor"
+  #define DEVICE_FQN_SHORT "muc03sens."
+  #define SENSOR_TYPE "indoor"
+  // feature
+  #define OLED_DISPLAY
+  #define SHT30
+  // MQTT: topic
+  const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_2";
+  
+#elif SENSOR_ID == 99                // DEVELOPMENT SENSOR
+  #define DEVICE_FQN "mucXXsensor"
+  #define DEVICE_FQN_SHORT "mucXXsens."
+  #define SENSOR_TYPE "DEVELOPMENT"
+  // feature
+  #define SERIAL_DEBUG
+//  #define OLED_DISPLAY
+//  #define SHT30
+  #define BME280
+  #define BATTERY_MONITOR
+  // MQTT: topic
+  const char* MQTT_SENSOR_TOPIC = "home/sensor/DEVELOPMENT";  
 #endif
 
+//////////////////////////////
+// modules configuration
+//////////////////////////////
+
 #ifdef SHT30
-  #include <WEMOS_SHT3X.h>
+  #include <Wire.h>
+  #include <SHTSensor.h>
+  SHTSensor sht30;
 #endif
 
 #ifdef BME280
@@ -56,34 +102,27 @@
   Adafruit_BME280 bme;
 #endif
 
+#ifdef OLED_DISPLAY
+  #include <SPI.h>
+  #ifndef SHT30         // SHT30 already includes Wire.h
+    #include <Wire.h>
+  #endif
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
+  #if (SSD1306_LCDHEIGHT != 48)     // The wemos OLED shield is not supported in the original lib
+    #error("Height incorrect, please fix Adafruit_SSD1306.h!");
+  #endif
+#endif
+
 #ifdef BATTERY_MONITOR
   unsigned int raw_adc_value = 0;
-  float volt = 0.0;
 #endif
 
-#define DEVICE_VER "1.0.0"
+//////////////////////////////
+// END modules configuration 
+//////////////////////////////
+
 #define MQTT_VERSION MQTT_VERSION_3_1_1
-
-// Depends on SENSOR_ID
-#if SENSOR_ID == 1                  // outside bme280 sensor
-  #define DEVICE_FQN "muc01sensor"
-  #define DEVICE_FQN_SHORT "muc01sens."
-  #define SENSOR_TYPE "outdoor"
-  // MQTT: topic
-  const char* MQTT_SENSOR_TOPIC = "home/sensor/outside_1";
-#elif SENSOR_ID == 2                // network cabinet sht30 sensor
-  #define DEVICE_FQN "muc02sensor"
-  #define DEVICE_FQN_SHORT "muc02sens."
-  #define SENSOR_TYPE "indoor"
-  // MQTT: topic
-  const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_1";
-#elif SENSOR_ID == 3                // network cabinet sht30 sensor
-  #define DEVICE_FQN "muc03sensor"
-  #define DEVICE_FQN_SHORT "muc03sens."
-  #define SENSOR_TYPE "indoor"
-  // MQTT: topic
-  const char* MQTT_SENSOR_TOPIC = "home/sensor/cabinet_2";
-#endif
 
 #define SENSOR_READ_INTERVAL 5 * 60 * 1000
 long lastMsg = 0;
@@ -94,15 +133,6 @@ long lastMsg = 0;
 #endif
 
 
-#ifdef SHT30
-  SHT3X sht30(0x45);
-#elif defined(DHT22)
-  // DHT - D1/GPIO5
-  #define DHTPIN D4
-  #define DHTTYPE DHT22
-  DHT dht(DHTPIN, DHTTYPE, 11);
-#endif
-
 // MQTT: ID, server IP, port, username and password
 const char* MQTT_CLIENT_ID = DEVICE_FQN;
 const char* MQTT_SERVER_IP = MQTT_SERVER_IP_ADDR;
@@ -110,11 +140,20 @@ const uint16_t MQTT_SERVER_PORT = 1883;
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient); 
-ESP8266WebServer server(80);
+AsyncWebServer server(80);
+
+struct readings {                   // Holds the current sensor readings
+  char str_temperature[10] = "0";   // trying to avoid String due to high memory fragmentation
+  char str_humidity[10] = "0";
+  char str_pressure[10] = "0";
+  char str_battery[10] = "0";
+  float temperature = 0;
+  float humidity = 0;
+  float pressure = 0;
+  float battery = 0;
+} currentReadings;
  
-float humidity, temp, pressure;           // Values read from sensor
-char str_humidity[10], str_temperature[10], str_pressure[10], str_volt[10];  // Rounded sensor values and as strings
-unsigned long previousMillis = 0;        // will store last temp was read
+unsigned long previousMillis = 0;        // will store last sensor was read
 const long interval = 2000;              // interval at which to read sensor
 
 
@@ -122,61 +161,46 @@ const long interval = 2000;              // interval at which to read sensor
  * Read all sensors
  */
 void readSensors() {
+
+  #ifdef SHT30
+    sht30.readSample();               
+    currentReadings.temperature = sht30.getTemperature();     // SHT30 - Read temperature as Celcius
+    currentReadings.humidity = sht30.getHumidity();           // SHT30 - Read humidity (percent)
+  #elif defined(BME280)
+    currentReadings.temperature = bme.readTemperature();      // BME280 - Read temperature as Celcius
+    currentReadings.humidity = bme.readHumidity();            // BME280 - Read humidity (percent)
+    currentReadings.pressure = bme.readPressure() / 100;      // BME280 - Read pressure in Pascal (Pa) and convert it to hPa
+  #endif
+
+  #ifdef BATTERY_MONITOR
+    raw_adc_value = analogRead(A0);                           // Get ADC value (connected via 100k with vbat+)
+    currentReadings.battery=raw_adc_value/1023.0*4.2;         // Max reading equals 1V ADC meassurement
+                                                              // and normalize to 4.2V (max. battery voltage - li-ion single cell)
+  #endif
   
-  // Wait at least 2 seconds seconds between measurements.
-  // if the difference between the current time and last time you read
-  // the sensor is bigger than the interval you set, read the sensor
-  // Works better than delay for things happening elsewhere also
-  unsigned long currentMillis = millis();
- 
-  if(currentMillis - previousMillis >= interval) {
-    // save the last time you read the sensor 
-    previousMillis = currentMillis;   
+  // Convert float to string
+  dtostrf(currentReadings.temperature, 1, 2, currentReadings.str_temperature);
+  dtostrf(currentReadings.humidity, 1, 2, currentReadings.str_humidity);
+  
+  #ifdef BME280
+    dtostrf(currentReadings.pressure, 3, 2, currentReadings.str_pressure);
+  #endif
 
-    #ifdef SHT30
-      sht30.get();
-      humidity = sht30.humidity;            // SHT30 - Read humidity (percent)
-      temp = sht30.cTemp;                   // SHT30 - Read temperature as Celcius
-      pressure = 0;                         // SHT30 has no pressure reading
-    #elif defined(BME280)
-      temp = bme.readTemperature();         // BME280 - Read temperature as Celcius
-      humidity = bme.readHumidity();        // BME280 - Read humidity (percent)
-      pressure = bme.readPressure() / 100;  // BME280 - Read pressure in Pascal (Pa) and convert it to hPa
-    #elif defined(DHT20)
-      humidity = dht.readHumidity();        // DHT22 - Read humidity (percent)
-      temp = dht.readTemperature();         // DHT22 - Read temperature as Celcius
-      pressure = 0;                         // DHT22 has no pressure reading
-    #endif
-
-    #ifdef BATTERY_MONITOR
-      raw_adc_value = analogRead(A0);       // Get ADC value (connected via 100k with vbat+)
-      volt=raw_adc_value/1023.0;            // Max reading equals 1V ADC meassurement
-      volt=volt*4.2;                        // Normalize to 4.2V (max. battery voltage - li-ion single cell)
-    #endif
-    
-    // Check if any reads failed and exit early (to try again).
-    if (isnan(humidity) || isnan(temp) || isnan(pressure)) {
-      Serial.println(F("Failed to read from sensor!"));
-      return;
-    } else {                                // Convert int/long/float to string
-      dtostrf(humidity, 1, 2, str_humidity);
-      dtostrf(temp, 1, 2, str_temperature);
-      dtostrf(pressure, 3, 2, str_pressure);
-      dtostrf(volt, 1, 3, str_volt);
-    }
-
-    #ifdef SERIAL_DEBUG
-      Serial.print("Sensor reading: T=");
-      Serial.print(temp);
-      Serial.print("C H=");
-      Serial.print(humidity);
-      Serial.print("% P=");
-      Serial.print(pressure);
-      Serial.print("hPa V=");   
-      Serial.print(volt);
-      Serial.println("V");
-    #endif 
-  }
+  #ifdef BATTERY_MONITOR
+    dtostrf(currentReadings.battery, 1, 3, currentReadings.str_battery);
+  #endif
+  
+  #ifdef SERIAL_DEBUG
+    Serial.print("Sensor reading: T=");
+    Serial.print(currentReadings.temperature);
+    Serial.print("C H=");
+    Serial.print(currentReadings.humidity);
+    Serial.print("% P=");
+    Serial.print(currentReadings.pressure);
+    Serial.print("hPa V=");   
+    Serial.print(currentReadings.battery);
+    Serial.println("V");
+  #endif 
 
   #ifdef OLED_DISPLAY                       // Show values on OLED display
     display.clearDisplay();
@@ -186,24 +210,15 @@ void readSensors() {
  
     display.println(DEVICE_FQN_SHORT);
     display.print("\nT ");
-    display.print(temp);
+    display.print(currentReadings.temperature);
     display.println(" C");
-
-    #ifdef SHT30
-      display.print("H ");
-      display.print(humidity);
-      display.println(" %");
-    #endif
-
-    #ifdef DHT22
-      display.print("H ");
-      display.print(humidity);
-      display.println(" %");
-    #endif
+    display.print("H ");
+    display.print(currentReadings.humidity);
+    display.println(" %");
 
     #ifdef BME280
       display.print("P ");
-      display.print(pressure);
+      display.print(currentReadings.pressure);
       display.println(" Pa");
     #endif
     
@@ -222,22 +237,18 @@ void publishData() {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& root = jsonBuffer.createObject();
   // INFO: the data must be converted into a string; a problem occurs when using floats...
-  root["temperature"] = str_temperature;
-  root["humidity"] = str_humidity;
-  root["pressure"] = str_pressure;
-  root["volt"] = str_volt;
+  root["temperature"] = currentReadings.str_temperature;
+  root["humidity"] = currentReadings.str_humidity;
+  #ifdef BME280
+    root["pressure"] = currentReadings.str_pressure;
+  #endif
+  #ifdef BATTERY_MONITOR
+    root["battery"] = currentReadings.str_battery;
+  #endif
   
   #ifdef SERIAL_DEBUG  
     root.prettyPrintTo(Serial);
     Serial.println("");
-    /* sample output:
-       {
-          "temperature": "23.20" ,
-          "humidity": "43.70"
-          "pressure": "956.32"
-          "volt": "4.2"
-       }
-    */
   #endif
   
   char data[200];
@@ -249,6 +260,9 @@ void publishData() {
 void callback(char* p_topic, byte* p_payload, unsigned int p_length) {
   // nothing to do here
   // we are not expecting any messages...
+  #ifdef SERIAL_DEBUG
+    Serial.printf("MQTT msg received. Topic: %s", p_topic);
+  #endif
 }
 
 /*
@@ -278,138 +292,102 @@ void reconnect() {
 }
 
 /*
+ * HTML_processor
+ * Evaluates the tags within the HTML page and replaces them with the correct values
+ */
+String HTML_processor(const String& var) {
+  if(var == "DEVICE_FQN")
+    return F(DEVICE_FQN);
+  if(var == "TEMPERATURE_VALUE")
+    return currentReadings.str_temperature;
+  if(var == "HUMIDITY_VALUE")
+    return currentReadings.str_humidity;
+  if(var == "PRESSURE_VALUE")
+    #ifdef BME280
+      return currentReadings.str_pressure;
+    #else
+      return "-";
+    #endif
+  if(var == "BATTERY_VALUE")
+    #ifdef BATTERY_MONITOR
+      return currentReadings.str_battery;
+    #else
+      return "-";
+    #endif
+    
+  if(var == "DEVICE_DOMAIN")
+    return F(SENSOR_DOMAIN); 
+  if(var == "FIRMWARE_VERSION")
+    return F(DEVICE_VER);           
+  return String();
+}
+/*
  * Serve main HTML page
  */
-void handle_root() {
-
-  readSensors();              // get sensor readings
-
-  String response;
-  response += "<html>\n";     // construct HTML page/response
-  response += "<head>\n";
-  response += "<meta charset=\"utf-8\">\n";
-  response += "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\n";
-  response += "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n";
-  response += "<title>";
-  response += DEVICE_FQN;
-  response += "</title>\n";
-  response += "<link rel=\"manifest\" href=\"manifest.json\">";
-  response += "<link rel=\"stylesheet\" href=\"https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css\"\n";
-  response += "integrity=\"sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7\" crossorigin=\"anonymous\">\n";
-  response += "<script src=\"https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js\" integrity=\"sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS\" crossorigin=\"anonymous\"></script>\n";
-  response += "</head>\n";
-
-  response += "<body>\n";
-  response += "<div class=\"container\">\n";
-  response += "<div class=\"page-header\">\n";
-  response += "<h1>";
-  response += DEVICE_FQN;
-  response += "</h1>\n";
-  response += "<p class=\"lead\">Current readings.</p>\n";
-  response += "</div>\n";
-  response += "<div class=\"row\">\n";
-
-#ifdef SHT30
-  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
-  response += str_temperature;
-  response += " &deg;C</p></div>\n";
-  response += "</div></div>\n";
-
-  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
-  response += str_humidity;
-  response += " %</p></div>\n";
-  response += "</div></div>\n";
-#endif
-
-#ifdef DHT22
-  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
-  response += str_temperature;
-  response += " &deg;C</p></div>\n";
-  response += "</div></div>\n";
-
-  response += "<div class=\"col-md-6\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
-  response += str_humidity;
-  response += " %</p></div>\n";
-  response += "</div></div>\n";
-#endif
-
-#ifdef BME280
-  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"temp.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Temperature<br/><p class=\"lead\">";
-  response += str_temperature;
-  response += " &deg;C</p></div>\n";
-  response += "</div></div>\n";
-
-  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"humi.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Humidity<br/><p class=\"lead\">";
-  response += str_humidity;
-  response += " %</p></div>\n";
-  response += "</div></div>\n";
-
-  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"pressure.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Pressure<br/><p class=\"lead\">";
-  response += str_pressure;
-  response += " hPa</p></div>\n";
-  response += "</div></div>\n";  
-
-  response += "<div class=\"col-md-3\"><div class=\"row\">\n";
-  response += "<div class=\"col-md-3\"> <img src=\"battery.png\" /> </div>\n";
-  response += "<div class=\"col-md-9\"> Battery<br/><p class=\"lead\">";
-  response += str_volt;
-  response += " V</p></div>\n";
-  response += "</div></div>\n";  
-#endif
-
-  response += "</div>\n";
-  response += "<div class=\"page-footer\">\n";
-  response += "<hr>\n";
-  response += DEVICE_FQN;
-  response += SENSOR_DOMAIN;
-  response += " <span class=\"label label-info\">ver. ";
-  response += DEVICE_VER;
-  response += "</span>\n";
-  response += "</div>\n";
-  response += "</div>\n";
-  response += "</body>\n";
-  response += "</html>\n";
-  
-  server.send(200, "text/html", response);    // send page to client
+void handleRoot(AsyncWebServerRequest *request) {
+  readSensors();                                                           // get sensor readings
+  request->send(SPIFFS, "/index.html", String(), false, HTML_processor);   // serve index.html after handled by HTML_procesor
 }
 
 /*
  * Return sensor readings in XML format
  */
-void handleGetReadings() {
-  readSensors();          // read sensor values
+void handleGetReadings(AsyncWebServerRequest *request) {
+  readSensors();                                                                          // read sensor values
 
-  String response;        // Construct XML response
+  AsyncResponseStream *response = request->beginResponseStream("text/xml");               // construct the response as XML
 
-  response += "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>";
-  response += "<readings>";
-  response += "<temperature>";
-  response += str_temperature;
-  response += "</temperature>";
-  response += "<humidity>";
-  response += str_humidity;
-  response += "</humidity>";
-  response += "<pressure>";
-  response += str_pressure;
-  response += "</pressure>";  
-  response += "</readings>";
+  response->print("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>");
+  response->print("<readings>");
+  response->printf("<temperature>%s</temperature>", currentReadings.str_temperature);
+  response->printf("<humidity>%s</humidity>", currentReadings.str_humidity);
+  #ifdef BME280                                                                           // we only have pressure values in case a BME280 sensor is present
+    response->printf("<pressure>%s</pressure>", currentReadings.str_pressure);
+  #endif
+  #ifdef BATTERY_MONITOR                                                                  // we only have the battery level if battery monitoring is present
+    response->printf("<battery>%s</battery>", currentReadings.str_battery);
+  #endif
+  response->print("</readings>");
 
-  server.send(200, "text/xml",response);    // send to client
+  request->send(response);                                                                // send response to client
 }
+
+/*
+ * Handle HTTP file upload (POST)
+ * Write file to SPIFFS
+ */
+void onUpload(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+  File f;
+  String fname = "/" + filename;                  // Prepend '/' to filename
+  if(!index){
+    #ifdef SERIAL_DEBUG
+      Serial.printf("UploadStart: %s\n", fname.c_str());
+    #endif
+    f = SPIFFS.open(fname, "w");                  // create file
+  } else {
+    f = SPIFFS.open(fname, "a");                  // only append
+  }
+  for(size_t i=0; i<len; i++){                    // write all bytes to file
+    // Serial.write(data[i]);
+    f.write(data[i]);
+  }
+  if(final){
+    #ifdef SERIAL_DEBUG
+      Serial.printf("UploadEnd: %s, %u B\n", fname.c_str(), index+len);
+      Serial.printf("Filsize in flash: %u B \n", f.size());
+    #endif
+  }
+  f.flush();                                      // close and flush
+  f.close();
+}
+
+
+
+/*
+ * ////////////////////////////////////////////////////////////////////////////////////////////////////
+ * ////////////////////////////////////////////////////////////////////////////////////////////////////
+ * ////////////////////////////////////////////////////////////////////////////////////////////////////
+ */
 
 
 /*
@@ -418,26 +396,30 @@ void handleGetReadings() {
  
 void setup(void)
 {
-  Serial.begin(250000); 
+  Serial.begin(250000);
+
   
   #ifdef OLED_DISPLAY
     display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3C (for the 64x48)
     display.display();
   #endif
 
-  #ifdef DHT22
-    dht.begin();
-  #endif
-
   #ifdef BME280
     if (!bme.begin(BME_SENSOR_ADDR)) Serial.println("Could not find a valid BME280 sensor, check wiring!");
   #endif
 
+
   #ifdef BATTERY_MONITOR
     pinMode(A0, INPUT);
   #endif
+
+  #ifdef SHT30
+    Wire.begin();
+    sht30.init();
+  #endif
   
   // Connect to WiFi network
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   
   #ifdef SERIAL_DEBUG
@@ -452,6 +434,11 @@ void setup(void)
       Serial.print(".");
     #endif
   }
+
+  #ifdef SERIAL_DEBUG
+    Serial.println("  done.");
+  #endif
+
 
   /*
      Over the air firmware update
@@ -489,23 +476,53 @@ void setup(void)
 
   /* END OTA Update */
 
-  SPIFFS.begin();
-
   #ifdef SERIAL_DEBUG
-    Serial.println("");
-    Serial.printf("Hello, this is %s\n",DEVICE_FQN);
+    Serial.printf("\nHello, this is %s\n",DEVICE_FQN);
     Serial.printf("Connected to: %s\n", WIFI_SSID);
     Serial.print(F("IP address: "));
     Serial.println(WiFi.localIP());
   #endif
 
-  // register HTTP server callbacks
-  server.on("/", handle_root);
-  server.on("/index.html", handle_root);
-  server.on("/readings.xml",handleGetReadings);
+  /*
+   * Opening SPIFFS
+   */
 
-  server.serveStatic("/", SPIFFS, "/");
-  server.onNotFound(handleUnknown);
+  bool spiffs_open = SPIFFS.begin();
+  //Serial.printf("Formatting done: %d\n", SPIFFS.format());    // WARNING: ONLY USE WHEN THE FLASH MEMORY HAS BEEN ERASED VIA IDE/ESPTOOL.PY OR YOU ARE USING A BRAND NEW DEVICE!
+  
+  #ifdef SERIAL_DEBUG
+    if (spiffs_open) {
+      Serial.println(F("\nOpening SPIFFS\t\tdone."));
+    } else {
+       Serial.println(F("FAILED TO OPEN SPIFFS!"));
+    }
+  #endif
+
+  // register HTTP server callbacks
+  server.on("/", handleRoot);
+  server.on("/index.htm", handleRoot);                                    // redirect to index.html
+  server.on("/readings.xml",handleGetReadings);                           // serve readings via XML
+  server.serveStatic("/", SPIFFS, "/").setCacheControl("max-age=600");    // serve static files
+  server.onNotFound([](AsyncWebServerRequest *request){                   // serve 404
+    request->send(404,"text/html",F("<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1><p>The requested URL was not found on this webserver.</p></body></html>"));
+  });
+
+  // accept file uploading
+  server.on("/upload", HTTP_POST, [](AsyncWebServerRequest *request){
+    request->send(200);
+  }, onUpload);
+
+  #ifdef SERIAL_DEBUG             // although not a serial debug function, it can be used to check which files are currently with the flash
+    server.on("/files", HTTP_GET, [](AsyncWebServerRequest *request) {
+      AsyncResponseStream *response = request->beginResponseStream("text/plain");
+      response->print("Files in SPIFFS:\r\n");
+      Dir dir = SPIFFS.openDir("/");
+      while (dir.next()) {
+        response->printf(" - %s (%i)\r\n",dir.fileName().c_str(),dir.fileSize());
+      }
+      request->send(response);
+    });
+  #endif
   
   server.begin();
   #ifdef SERIAL_DEBUG
@@ -522,7 +539,6 @@ void setup(void)
  */
  
 void loop(void) {
-  server.handleClient();      // handle HTTP clients
   ArduinoOTA.handle();        // handle OTA clients
 
   if (!client.connected()) {  // keep MQTT connection alive
@@ -537,28 +553,3 @@ void loop(void) {
     publishData();
   }
 } // End MAIN LOOP
-
-
-// Sendet "Not Found"-Seite
-void notFound()
-{ String HTML = F("<html><head><title>404 Not Found</title></head><body>"
-                  "<h1>Not Found</h1>"
-                  "<p>The requested URL was not found on this webserver.</p>"
-                  "</body></html>");
-  server.send(404, "text/html", HTML);
-} // End notFound
-
-// Trying to load the file from SPIFFS
-void handleUnknown()
-{ String filename = server.uri();
-
-  File pageFile = SPIFFS.open(filename, "r");
-  if (pageFile) {
-    String contentTyp = StaticRequestHandler::getContentType(filename);
-    server.sendHeader("Cache-Control","public, max-age=31536000");
-    size_t sent = server.streamFile(pageFile, contentTyp);
-    pageFile.close();
-  }
-  else
-    notFound();
-} // End handleUnknown
